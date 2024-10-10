@@ -1,5 +1,4 @@
 import requests
-import sqlite3
 
 
 class Institution:
@@ -8,6 +7,7 @@ class Institution:
     def __init__(self, institution_id: int = None, sent_to_tms: bool = False):
         self.institution_id = institution_id
         self.sent_to_tms = sent_to_tms
+        self.institution_blocks_endpoint = f'https://www.studentshub.com/api/sanity/school/{self.institution_id}/cards?blocks=true'
 
     @classmethod
     def load(cls, db, institution_id):
@@ -31,4 +31,4 @@ class Institution:
 
     @classmethod
     def get_number_of_institutions(cls) -> int:
-        return len(cls.get_all_ids())
+        return len(cls.get_all_ids_from_external_db())
