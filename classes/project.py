@@ -1,8 +1,8 @@
-import lokalise
+from classes.tms import TMS
 
 
 class Project:
-    def __init__(self, tms_client: lokalise.Client):
+    def __init__(self, tms_client: TMS.client):
         self.tms_client = tms_client
 
     def get_projects(self):

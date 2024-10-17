@@ -1,4 +1,5 @@
 from classes.db import DB
+from classes.lokalisetms import LokaliseTMS
 from classes.project import Project
 from classes.key import Key
 from classes.institution import Institution
@@ -7,14 +8,13 @@ import json
 import requests
 import os
 import base64
-import lokalise
 
 
 class App:
     def __init__(self):
         load_dotenv()
-        self.tms = lokalise.Client(os.getenv('TMS_TOKEN'))
-        self.project = Project(self.tms)
+        self.tms = LokaliseTMS(os.getenv('TMS_TOKEN'))
+        self.project = Project(self.tms.client)
         self.key = Key(self.project)
         self.institution = Institution()
         self.db = DB('keg_l10n_llm_poc')
@@ -97,16 +97,13 @@ class App:
             encoded_string = base64.b64encode(file.read())
             return encoded_string.decode('utf-8')
 
-    @staticmethod
-    def send_entities_to_tms_as_json(files: list[bytes]) -> None:
+    def send_entities_to_tms_as_json(self, files: list[str]) -> None:
         try:
             for file in files:
-                payload = {
-                    "data": App.encode_file_to_base64(file),
-                    "filename": str(file),
-                    "lang_iso": 'en',
-                }
-                process = lokalise.Client.upload_file(os.getenv('INSTITUTION_INTRO_CARD_PROJECT'), params=payload)
+                process = self.tms.upload_file(
+                    project_id=os.getenv('INSTITUTION_INTRO_CARD_PROJECT'),
+                    file=file,
+                    lang_iso='en')
         except requests.exceptions.RequestException as e:
             print(f"An error occurred while sending the request: {e}")
 
@@ -124,7 +121,8 @@ class App:
                         if len(block) > 1 and block[0] != "<" and block[-1] != ">":
                             blocks_of_pure_text[f'key{index}'] = block
                     # print(os.path.join('.', 'temp_files', 'institutions', 'intro', f'{institutions_never_sent_to_tms[i][0]}.json'))
-                    self.save_dict_as_json(blocks_of_pure_text, os.path.join('.', 'temp_files', 'institutions', 'intro', f'{institutions_never_sent_to_tms[i][0]}.json'))
+                    self.save_dict_as_json(blocks_of_pure_text, os.path.join('.', 'temp_files', 'institutions', 'intro',
+                                                                             f'{institutions_never_sent_to_tms[i][0]}.json'))
                 else:
                     print('Error fetching institution data')
         else:
@@ -133,8 +131,10 @@ class App:
     def run(self):
         App.clear_console()
         App.display_welcome_message()
-        choice = App.prompt_user("Would you like to process institutions or programs? Type 1 for institutions and 2 for programs.\n")
+        choice = App.prompt_user(
+            "Would you like to process institutions or programs? Type 1 for institutions and 2 for programs.\n")
         entities_never_sent_to_tms = self.handle_choice(choice)
         self.prepare_institutions_for_tms(entities_never_sent_to_tms)
+        # App.send_entities_to_tms_as_json()
         # self.send_entities_to_tms_as_json(entities_ready_for_tms)
         self.db.close()
