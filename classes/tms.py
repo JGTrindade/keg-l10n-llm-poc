@@ -4,12 +4,11 @@ from abc import ABC, abstractmethod
 class TMS(ABC):
     def __init__(self, token: str):
         self.token = token
-        self.client = self.client()
+        self.client = None
 
-    @abstractmethod
-    def client(self) -> object:
+    def fetch_projects(self, params: dict = None):
         pass
 
     @abstractmethod
-    def upload_file(self, project_id: str, file: str, lang_iso: str) -> object:
+    def upload_file(self, project_id: str, params: dict) -> object:
         pass

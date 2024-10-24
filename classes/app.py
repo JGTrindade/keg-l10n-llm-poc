@@ -1,11 +1,11 @@
 from classes.db import DB
 from classes.lokalisetms import LokaliseTMS
+from classes.APIClient import APIClient
 from classes.project import Project
-from classes.key import Key
 from classes.institution import Institution
 from dotenv import load_dotenv
-import json
 import requests
+import json
 import os
 import base64
 
@@ -14,9 +14,9 @@ class App:
     def __init__(self):
         load_dotenv()
         self.tms = LokaliseTMS(os.getenv('TMS_TOKEN'))
-        self.project = Project(self.tms.client)
-        self.key = Key(self.project)
-        self.institution = Institution()
+        self.project = Project(self.tms)
+        self.api_client = APIClient(base_url=os.getenv('STDHUB_API_BASE_URL'), headers={"x-api-key": os.getenv('STDHUB_API_AUTH_KEY')})
+        self.institution = Institution(self.api_client)
         self.db = DB('keg_l10n_llm_poc')
 
     @staticmethod
@@ -39,15 +39,15 @@ class App:
         if choice == '1':
             num_of_institutions_to_send_to_tms = int(
                 input("Insert the number of institutions to send content for review (max 500).\n"))
-            return self.get_institutions_never_sent_to_tms(num_of_institutions_to_send_to_tms)
-        else:
-            num_of_institutions_to_send_to_tms = int(
-                input("Insert the number of programs to send content for review (max 500).\n"))
-            return self.handle_programs(num_of_institutions_to_send_to_tms)
+            return self.fetch_institutions_never_sent_to_tms(num_of_institutions_to_send_to_tms)
+        # else:
+        #     num_of_institutions_to_send_to_tms = int(
+        #         input("Insert the number of programs to send content for review (max 500).\n"))
+        #     return self.handle_programs(num_of_institutions_to_send_to_tms)
 
-    def get_institutions_never_sent_to_tms(self, num_of_institutions_to_send_to_tms: int) -> tuple:
+    def fetch_institutions_never_sent_to_tms(self, num_of_institutions_to_send_to_tms: int) -> tuple:
         institutions_in_db = self.db.query("SELECT id FROM institutions").fetchall()
-        latest_institutions = self.institution.get_all_ids_from_external_db()
+        latest_institutions = self.institution.fetch_all_ids_from_external_db()
 
         data = list()
         for institution in latest_institutions:
@@ -97,34 +97,38 @@ class App:
             encoded_string = base64.b64encode(file.read())
             return encoded_string.decode('utf-8')
 
-    def send_entities_to_tms_as_json(self, files: list[str]) -> None:
+    @staticmethod
+    def list_files_in_directory(directory: str) -> list:
+        files = []
+
+        for root, dirs, files in os.walk(directory):
+            for file in files:
+                # Combine the root directory and file name to get the full path
+                full_path = os.path.join(root, file)
+                files.append(full_path)
+        return files
+
+    def send_entities_to_tms_as_json(self) -> str:
+        files = self.list_files_in_directory('temp_files/institutions/intro')
         try:
             for file in files:
-                process = self.tms.upload_file(
-                    project_id=os.getenv('INSTITUTION_INTRO_CARD_PROJECT'),
-                    file=file,
-                    lang_iso='en')
+                payload = {"data": App.encode_file_to_base64(file), "filename": file, "lang_iso": "en"}
+                process = self.tms.upload_file(project_id=os.getenv('INSTITUTION_INTRO_CARD_PROJECT'), params=payload)
+                return process.status
         except requests.exceptions.RequestException as e:
             print(f"An error occurred while sending the request: {e}")
 
-    def prepare_institutions_for_tms(self, institutions_never_sent_to_tms: tuple) -> None:
-        keys_available = self.key.calculate_keys_from_llm_projects()
-        if keys_available <= self.key.allocated_for_llm_reviews:
+    def prepare_institutions_for_tms(self, institutions_never_sent_to_tms: tuple, ) -> None:
+        keys_available = self.project.key.calculate_keys_from_llm_projects(self.project)
+        if keys_available <= self.project.key.allocated_for_llm_reviews:
             for i, institution in enumerate(institutions_never_sent_to_tms):
-                r = requests.get(
-                    f'https://www.studentshub.com/api/sanity/school/{institutions_never_sent_to_tms[i][0]}/cards?blocks=true')
-                if r.ok:
-                    data = r.json()
-                    all_blocks = data[1]['item']['blocks']
-                    blocks_of_pure_text = {}
-                    for index, block in enumerate(all_blocks):
-                        if len(block) > 1 and block[0] != "<" and block[-1] != ">":
-                            blocks_of_pure_text[f'key{index}'] = block
-                    # print(os.path.join('.', 'temp_files', 'institutions', 'intro', f'{institutions_never_sent_to_tms[i][0]}.json'))
-                    self.save_dict_as_json(blocks_of_pure_text, os.path.join('.', 'temp_files', 'institutions', 'intro',
-                                                                             f'{institutions_never_sent_to_tms[i][0]}.json'))
-                else:
-                    print('Error fetching institution data')
+                data = self.api_client.get_institution_id(institutions_never_sent_to_tms[i][0])
+                all_blocks = data[1]['item']['blocks']
+                blocks_of_pure_text = {}
+                for index, block in enumerate(all_blocks):
+                    if len(block) > 1 and block[0] != "<" and block[-1] != ">":
+                        blocks_of_pure_text[f'key{index}'] = block
+                    self.save_dict_as_json(blocks_of_pure_text, os.path.join('.', 'temp_files', 'institutions', 'intro', f'{institutions_never_sent_to_tms[i][0]}.json'))
         else:
             print('Not enough allocated keys for review.')
 
@@ -136,5 +140,4 @@ class App:
         entities_never_sent_to_tms = self.handle_choice(choice)
         self.prepare_institutions_for_tms(entities_never_sent_to_tms)
         # App.send_entities_to_tms_as_json()
-        # self.send_entities_to_tms_as_json(entities_ready_for_tms)
         self.db.close()
