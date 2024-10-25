@@ -15,7 +15,8 @@ class App:
         load_dotenv()
         self.tms = LokaliseTMS(os.getenv('TMS_TOKEN'))
         self.project = Project(self.tms)
-        self.api_client = APIClient(base_url=os.getenv('STDHUB_API_BASE_URL'), headers={"x-api-key": os.getenv('STDHUB_API_AUTH_KEY')})
+        self.api_client = APIClient(base_url=os.getenv('STDHUB_API_BASE_URL'),
+                                    headers={"x-api-key": os.getenv('STDHUB_API_AUTH_KEY')})
         self.institution = Institution(self.api_client)
         self.db = DB('keg_l10n_llm_poc')
 
@@ -101,22 +102,21 @@ class App:
     def list_files_in_directory(directory: str) -> list:
         files = []
 
-        for root, dirs, files in os.walk(directory):
+        for roots, dirs, files in os.walk(directory):
+            files_in_directory = list()
             for file in files:
-                # Combine the root directory and file name to get the full path
-                full_path = os.path.join(root, file)
-                files.append(full_path)
-        return files
+                files_in_directory.append(os.path.join(roots, file))
+        return files_in_directory
 
-    def send_entities_to_tms_as_json(self) -> str:
+    def send_entities_to_tms_as_json(self):
         files = self.list_files_in_directory('temp_files/institutions/intro')
-        try:
-            for file in files:
+        for file in files:
+            try:
                 payload = {"data": App.encode_file_to_base64(file), "filename": file, "lang_iso": "en"}
                 process = self.tms.upload_file(project_id=os.getenv('INSTITUTION_INTRO_CARD_PROJECT'), params=payload)
-                return process.status
-        except requests.exceptions.RequestException as e:
-            print(f"An error occurred while sending the request: {e}")
+            # TODO Implement successful feedback.
+            except requests.exceptions.RequestException as e:
+                print(f"An error occurred while sending the request: {e}")
 
     def prepare_institutions_for_tms(self, institutions_never_sent_to_tms: tuple, ) -> None:
         keys_available = self.project.key.calculate_keys_from_llm_projects(self.project)
@@ -128,7 +128,8 @@ class App:
                 for index, block in enumerate(all_blocks):
                     if len(block) > 1 and block[0] != "<" and block[-1] != ">":
                         blocks_of_pure_text[f'key{index}'] = block
-                    self.save_dict_as_json(blocks_of_pure_text, os.path.join('.', 'temp_files', 'institutions', 'intro', f'{institutions_never_sent_to_tms[i][0]}.json'))
+                    self.save_dict_as_json(blocks_of_pure_text, os.path.join('.', 'temp_files', 'institutions', 'intro',
+                                                                             f'{institutions_never_sent_to_tms[i][0]}.json'))
         else:
             print('Not enough allocated keys for review.')
 
@@ -139,5 +140,6 @@ class App:
             "Would you like to process institutions or programs? Type 1 for institutions and 2 for programs.\n")
         entities_never_sent_to_tms = self.handle_choice(choice)
         self.prepare_institutions_for_tms(entities_never_sent_to_tms)
-        # App.send_entities_to_tms_as_json()
+        # self.list_files_in_directory('temp_files/institutions/intro')
+        self.send_entities_to_tms_as_json()
         self.db.close()
